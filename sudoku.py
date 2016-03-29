@@ -1,12 +1,11 @@
 #!/usr/local/bin/python3
+# -*- coding: utf-8 -*-
+"""A collection of functions for generating and solving sudoku puzzles."""
 
 import logging
 import os
 import random
-import re
 import sys
-
-from collections import OrderedDict
 
 # create logger
 logger = logging.getLogger(__name__)
@@ -25,82 +24,37 @@ ch.setFormatter(formatter)
 # add ch to logger
 logger.addHandler(ch)
 
-class Grid(object):
+class RetryError(Exception):
+    """Exception for when a function fails to produce a result after a limit."""
+    def __init__(self, retry_number = None, retry_limit = None):
+        if retry_number is not None and type(retry_number) is not int:
+            raise TypeError("Parameter `retry_number` is not of type int")
+        if retry_limit is not None and type(retry_limit) is not int:
+            raise TypeError("Parameter `retry_number` is not of type int")
+        self.retry_number = retry_limit
+        self.retry_limit = retry_limit
+    def __str__(self):
+        retry_limit_text = ""
+        retry_number_text = ""
+        if self.retry_limit is not None:
+            retry_limit_text = "(" + str(self.retry_limit) + ")"
+        if self.retry_number is not None:
+            retry_number_text = "(" + str(self.retry_number) + ")"
+        return "Current retry number{0} surpassed retry limit ({1})".format(retry_number_text, retry_limit_text)
 
-    def __init__(self, number_of_givens=50):
+def print_board(board):
+    """Prints out the contents of a dict mapped to a sudoku puzzle.
 
-        # The value of 'number_of_givens' must be positive and greater than 0
-        if number_of_givens < 1:
-            raise ValueError("number_of_givens must be positive and greater than 0")
+    This function assumes that `board` is a dictionary containing key, value
+    pairs where the key is a coordinate within the sudoku board and value is a
+    value from 1 to 9.
 
-        # Grid containing initially given values and positions
-        self.given_grid = {
-                                                                                                (7,0): 7,
-                                                            (4,1): 8,   (5,1): 6,   (6,1): 2,
-                                                (3,2): 2,   (4,2): 3,               (6,2): 4,
-                                    (2,3): 4,                                                   (7,3): 2,
-                        (1,4): 1,   (2,4): 3,                           (5,4): 4,
-                        (1,5): 7,                           (4,5): 1,   (5,5): 5,                           (8,5): 4,
-                        (1,6): 3,   (2,6): 1,                                                   (7,6): 4,   (8,6): 2,
-            (0,7): 6,                           (3,7): 7,                           (6,7): 3,   (7,7): 8,
-                                                                        (5,8): 1,   (6,8): 6
+    """
+    # Requires a dict
+    if type(board) is not dict:
+        raise TypeError("Requires 'dict' instance")
 
-
-        }
-        prev_grid = {
-                        (1,0): 7,                                       (5,0): 6,
-            (0,1): 9,                                                                           (7,1): 4,   (8,1): 1,
-                                    (2,2): 8,                           (5,2): 9,               (7,2): 5,
-                        (1,3): 9,                                       (5,3): 7,                           (8,3): 2,
-                                    (2,4): 3,                                       (6,4): 8,
-            (0,5): 4,                           (3,5): 8,                                       (7,5): 1,
-                        (1,6): 8,               (3,6): 3,                           (6,6): 9,
-            (0,7): 1,   (1,7): 6,                                                                           (8,7): 7,
-                                                                        (5,8): 5,               (7,8): 8,
-        }
-
-        # Grid containing solution to the puzzle
-        self.solutions = {}
-
-        # Whether or the puzzle can be solved
-        self.is_solvable = False
-
-        # Keep generating new puzzles until we find one that is solvable
-        retry = 0
-        retry_limit = 100000
-        while not self.is_solvable:
-            #self.__generate_givens(number_of_givens)
-            self.solutions = depth_first_solve(self.given_grid)
-
-            self.is_solvable = len(self.solutions) != 0
-
-            if not self.is_solvable:
-                retry += 1
-                logger.debug("Retrying... Count:{0}".format(retry))
-            if retry >= retry_limit:
-                logger.warning("Solve failure")
-                break
-
-    def __generate_givens(self, number_of_givens):
-        # Keep going until we have the desired amount
-        while len(self.given_grid) != number_of_givens:
-            # Create a random position and value
-            pos = (random.randint(0,8), random.randint(0,8))
-            val = random.randint(1, 9)
-
-            # Check if position already taken
-            if pos in self.given_grid:
-                continue
-
-            # Attempt to add value
-            self.__attempt_add(self.given_grid, pos, val)
-
-def print_grid(grid, log=False):
-    # Requires 'Grid' instance
-    if type(grid) is not dict:
-        raise ValueError("Requires 'dict' instance")
-
-    # Loop through grid, printing box
+    # Loop through the board, printing a each value within a grid
     for j in range(9):
         if j == 0:
             # Top border
@@ -113,38 +67,55 @@ def print_grid(grid, log=False):
         num_list = []
         # Values of current row
         for i in range(9):
-            if (i,j) not in grid:
+            if (i,j) not in board:
                 num_list.append(" ")
             else:
-                num_list.append(grid[(i,j)])
-        if not log:
-            print("|{0}|{1}|{2}█{3}|{4}|{5}█{6}|{7}|{8}|".format(num_list[0],
-                    num_list[1], num_list[2], num_list[3], num_list[4], num_list[5],
-                    num_list[6], num_list[7], num_list[8]))
-        else:
-            logger.debug("|{0}|{1}|{2}█{3}|{4}|{5}█{6}|{7}|{8}|".format(num_list[0],
-                    num_list[1], num_list[2], num_list[3], num_list[4], num_list[5],
-                    num_list[6], num_list[7], num_list[8]))
+                num_list.append(board[(i,j)])
+
+        print("|{0}|{1}|{2}█{3}|{4}|{5}█{6}|{7}|{8}|".format(num_list[0],
+                num_list[1], num_list[2], num_list[3], num_list[4], num_list[5],
+                num_list[6], num_list[7], num_list[8]))
 
 
     # Bottom border
     print("-------------------")
 
-def main():
-    print("Creating sudoku...")
-    puzzle = Grid(number_of_givens=11)
-    print("Initial grid:")
-    print_grid(puzzle.given_grid)
+def generate_givens(number_of_givens, retry_limit = 1000):
+    """Generates a sudoku board with randomly generated givens."""
+    if number_of_givens > 81 or number_of_givens < 0:
+        raise ValueError("Number of givens must be from 0 to 81")
 
-    if puzzle.is_solvable:
-        print("Solved grid(s):")
-        for grid in puzzle.solutions:
-            print_grid(dict(grid))
-    else:
-        logger.warning("Could not create solvable puzzle")
+    # Board to hold our givens
+    board = {}
+
+    # Retry counter
+    retry = 0
+
+    # Keep going until we have the desired amount
+    while len(board) != number_of_givens:
+        # Check to see if we surpassed our retry limit
+        if retry > retry_limit:
+            raise RetryError(retry_number=retry, retry_limit=retry_limit)
+
+        # Create a random position and value
+        attempt_x = random.randint(0,8)
+        attempt_y = random.randint(0,8)
+        attempt_value = random.randint(1, 9)
+
+        # Check if position already taken
+        if not check_valid_space(attempt_x, attempt_y, attempt_value, board):
+            # Try again with another valid value and position
+            retry += 1
+            continue
+
+        # Add value to board
+        board[(attempt_x,attempt_y)] = attempt_value
+
+    return board
 
 
 def depth_first_solve(givens = {}):
+    """ Tries to solve a sudoku using depth-first algorithm."""
     decision_tree = {}
 
     # A dict of currently available values (should be nine each)
@@ -159,6 +130,7 @@ def depth_first_solve(givens = {}):
 
     # Solver helper
     def solve_help(current_board, available_values, solutions = set()):
+        """Helper function for depth-first algorithm."""
         # Check if solved
         values_left = 0
 
@@ -201,37 +173,96 @@ def depth_first_solve(givens = {}):
     return solve_help(board, available_values)
 
 
-def find_available_space(current_board):
+def find_available_space(board):
+    """Traverses the sudoku board finding the first available space.
+
+    This function assumes that `board` is a dictionary containing key, value
+    pairs where the key is a coordinate within the sudoku board and value is a
+    value from 1 to 9.
+    """
     for y in range(9):
         for x in range(9):
-            if (x,y) not in current_board:
+            if (x,y) not in board:
                 return (x,y)
 
-def check_valid_space(x, y, val, current_board):
+def check_valid_space(x, y, val, board):
+    """ Checks if the value fits in the sudoku board following standard rules.
 
-        # Check row if number is already placed
-        for i in range(9):
+    This function assumes that `board` is a dictionary containing key, value
+    pairs where the key is a coordinate within the sudoku board and value is a
+    value from 1 to 9.
+
+    """
+    # Check row if number is already placed
+    for i in range(9):
+        # Is valid position and value is equal to what we want to add
+        if (i, y) in board and board[(i, y)] == val and (i, y) != (x,y):
+            return False
+
+    # Check column
+    for i in range(9):
+        # Is valid position and value is equal to what we want to add
+        if (x, i) in board and board[(x,i)] == val and (x, i) != (x,y):
+            return False
+
+    # Check box
+    box_x = x//3 * 3
+    box_y = y//3 * 3
+    for j in range(3):
+        for i in range(3):
             # Is valid position and value is equal to what we want to add
-            if (i, y) in current_board and current_board[(i, y)] == val and (i, y) != (x,y):
+            if (i + box_x, j + box_y) in board and board[(i + box_x, j + box_y)] == val and (i + box_x, j + box_y) != (x,y):
                 return False
 
-        # Check column
-        for i in range(9):
-            # Is valid position and value is equal to what we want to add
-            if (x, i) in current_board and current_board[(x,i)] == val and (x, i) != (x,y):
-                return False
+    return True
 
-        # Check box
-        box_x = x//3 * 3
-        box_y = y//3 * 3
-        for j in range(3):
-            for i in range(3):
-                # Is valid position and value is equal to what we want to add
-                if (i + box_x, j + box_y) in current_board and current_board[(i + box_x, j + box_y)] == val and (i + box_x, j + box_y) != (x,y):
-                    return False
+def main():
+    """Main function that generates and solves a sudoku."""
+    print("Generating given values...")
 
-        return True
+    # Board containing initially given values and positions
+    givens = {
+                                                                                            (7,0): 7,
+                                                        (4,1): 8,   (5,1): 6,   (6,1): 2,
+                                            (3,2): 2,   (4,2): 3,               (6,2): 4,
+                                (2,3): 4,                                                   (7,3): 2,
+                    (1,4): 1,   (2,4): 3,                           (5,4): 4,
+                    (1,5): 7,                           (4,5): 1,   (5,5): 5,                           (8,5): 4,
+                    (1,6): 3,   (2,6): 1,                                                   (7,6): 4,   (8,6): 2,
+        (0,7): 6,                           (3,7): 7,                           (6,7): 3,   (7,7): 8,
+                                                                    (5,8): 1,   (6,8): 6
 
+
+    }
+
+    print("Initial grid:")
+    print_board(givens)
+
+    print("Solving sudoku...")
+
+    # Bool to hold whether or the puzzle can be solved and if it only has one solution
+    is_proper_sudoku = False
+
+    # Set retry count and limit so we don't take too long
+    retry = 0
+    retry_limit = 100000
+
+    # Keep generating new puzzles until we find one that is solvable
+    while not is_proper_sudoku:
+        solutions = depth_first_solve(givens)
+
+        is_proper_sudoku = len(solutions) == 1
+
+        if not is_proper_sudoku:
+            retry += 1
+            logger.debug("Retrying... Count:{0}".format(retry))
+        if retry >= retry_limit:
+            raise RetryError(retry_number=retry, retry_limit=retry_limit)
+
+
+    print("Solved grid(s):")
+    for solution in solutions:
+        print_board(dict(solution))
 
 
 if __name__ == '__main__':
