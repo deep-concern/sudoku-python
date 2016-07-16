@@ -5,6 +5,7 @@
 import logging
 import os
 import random
+import re
 import sys
 
 # create logger
@@ -24,6 +25,12 @@ ch.setFormatter(formatter)
 # add ch to logger
 logger.addHandler(ch)
 
+class SudokuGrid(object):
+    """Class to hold information about a sudoku."""
+    def __init__(self, sudoku_string):
+        self.sudoku_string = sudoku_string
+        self.grid = parse_sudoku_string(sudoku_string)
+
 class RetryError(Exception):
     """Exception for when a function fails to produce a result after a limit."""
     def __init__(self, retry_number = None, retry_limit = None):
@@ -42,6 +49,74 @@ class RetryError(Exception):
             retry_number_text = "(" + str(self.retry_number) + ")"
         return "Current retry number{0} surpassed retry limit ({1})".format(retry_number_text, retry_limit_text)
 
+def is_proper_sudoku(sudoku_string):
+    """Uses a regex expression to validate a sudoku string.
+
+    Sudoku strings need to be 81 characters using digits 0-9, or '.'
+
+    Args(str): A string to be validated.
+
+    Returns:
+        bool: True if the string is a proper sudoku string. False otherwise.
+    """
+    # Must be type 'str'
+    if type(sudoku_string) != str:
+        return False
+
+    # Sudokus should only have 81 squares (currently)
+    if len(sudoku_string) != 81:
+        return False
+
+    #
+    m = re.search(r"[0-9/.]{81}]", sudoku_string)
+    return m is not None
+
+
+
+
+def parse_sudoku_string(sudoku_string):
+    """Parses a sudoku saved as a string into a grid to be parsed.
+
+    Takes a string of given values, with '0' or '.' being empty spaces, and
+    attempts to create a dictionary of given values.
+
+    No attempts will be made to verify
+
+    Args:
+        sudoku_string(str): A string of length 81 that contains either digits
+            from 0-9, or '.'.
+
+            The string is parsed left to right, filling out grid from left to
+            right, top to bottom.
+
+            Digits 1-9 will be considered as given values, and '0' or '.' will
+            be blanks.
+
+    Returns:
+        dict: A dictionary where the keys are 2D coordinates of given values
+        and the values will be a digit from 1 to 9.
+
+        This can be used as givens for a sudoku, or if the dict contains 81
+        keys, this may be a solution.
+
+
+    """
+    if not is_proper_sudoku(sudoku_string):
+        return False
+
+    grid = {}
+
+    for y in range(9):
+        offset = y * 8
+        for x in range(9):
+            index = offset + x
+            if not check_valid_space(x, y, sudoku_string[index], grid):
+                return False
+            else:
+                grid
+
+
+
 def print_board(board):
     """Prints out the contents of a dict mapped to a sudoku puzzle.
 
@@ -56,29 +131,20 @@ def print_board(board):
 
     # Loop through the board, printing a each value within a grid
     for j in range(9):
-        if j == 0:
-            # Top border
-            print("-------------------")
-        elif j == 3 or j == 6:
+        if  j == 3 or j == 6:
             # Block seperator
-            print("|█████████████████|")
-        else:
-            print("------█-----█------")
+            print("-----------")
         num_list = []
         # Values of current row
         for i in range(9):
             if (i,j) not in board:
-                num_list.append(" ")
+                num_list.append(".")
             else:
                 num_list.append(board[(i,j)])
 
-        print("|{0}|{1}|{2}█{3}|{4}|{5}█{6}|{7}|{8}|".format(num_list[0],
+        print("{0}{1}{2}|{3}{4}{5}|{6}{7}{8}".format(num_list[0],
                 num_list[1], num_list[2], num_list[3], num_list[4], num_list[5],
                 num_list[6], num_list[7], num_list[8]))
-
-
-    # Bottom border
-    print("-------------------")
 
 def generate_givens(number_of_givens, retry_limit = 1000):
     """Generates a sudoku board with randomly generated givens."""
@@ -116,7 +182,6 @@ def generate_givens(number_of_givens, retry_limit = 1000):
 
 def depth_first_solve(givens = {}):
     """ Tries to solve a sudoku using depth-first algorithm."""
-    decision_tree = {}
 
     # A dict of currently available values (should be nine each)
     available_values = {x:9 for x in range(1,10)}
@@ -129,7 +194,7 @@ def depth_first_solve(givens = {}):
         available_values[givens[(given_x, given_y)]] -= 1
 
     # Solver helper
-    def solve_help(current_board, available_values, solutions = set()):
+    def solve_help(current_board, available_values, solutions = set(), retry = 0):
         """Helper function for depth-first algorithm."""
         # Check if solved
         values_left = 0
@@ -160,7 +225,7 @@ def depth_first_solve(givens = {}):
                 new_values[value] -= 1
                 new_board[(x,y)] = value
 
-                solutions_set = solve_help(new_board, new_values, solutions)
+                solutions_set = solve_help(new_board, new_values, solutions, retry + 1)
 
                 # Add new solutions to current solutions
                 for solution in solutions_set:
@@ -216,54 +281,57 @@ def check_valid_space(x, y, val, board):
 
     return True
 
-def main():
-    """Main function that generates and solves a sudoku."""
-    print("Generating given values...")
-
-    # Board containing initially given values and positions
-    givens = {
-                                                                                            (7,0): 7,
-                                                        (4,1): 8,   (5,1): 6,   (6,1): 2,
-                                            (3,2): 2,   (4,2): 3,               (6,2): 4,
-                                (2,3): 4,                                                   (7,3): 2,
-                    (1,4): 1,   (2,4): 3,                           (5,4): 4,
-                    (1,5): 7,                           (4,5): 1,   (5,5): 5,                           (8,5): 4,
-                    (1,6): 3,   (2,6): 1,                                                   (7,6): 4,   (8,6): 2,
-        (0,7): 6,                           (3,7): 7,                           (6,7): 3,   (7,7): 8,
-                                                                    (5,8): 1,   (6,8): 6
-
-
-    }
-
-    print("Initial grid:")
-    print_board(givens)
-
-    print("Solving sudoku...")
-
+def generate_sudoku(number_of_givens, retry_limit=10000):
+    """Attempts to generate a valid sudoku with a certain amount of givens."""
     # Bool to hold whether or the puzzle can be solved and if it only has one solution
     is_proper_sudoku = False
 
-    # Set retry count and limit so we don't take too long
+    # Set a retry limit
     retry = 0
-    retry_limit = 100000
 
-    # Keep generating new puzzles until we find one that is solvable
+    # Givens and solution set with solution to return
+    givens = {}
+    solutions = set()
+
     while not is_proper_sudoku:
+        # Generate givens
+        givens = generate_givens(number_of_givens)
+        givens = {}
+
+        # Get solutions
         solutions = depth_first_solve(givens)
 
         is_proper_sudoku = len(solutions) == 1
 
         if not is_proper_sudoku:
             retry += 1
-            logger.debug("Retrying... Count:{0}".format(retry))
+            print("Retrying... {0}".format(retry))
+            continue
         if retry >= retry_limit:
             raise RetryError(retry_number=retry, retry_limit=retry_limit)
 
+    return givens, solutions.pop()
+
+
+def main():
+    """Main function that generates and solves a sudoku."""
+    print("Generating given values...")
+
+    # Board containing initially given values and positions
+    test_givens = ''
+
+    # Get a valid sudoku
+    givens, solution = generate_sudoku(11)
+
+    print("Initial grid:")
+    print_board(givens)
 
     print("Solved grid(s):")
-    for solution in solutions:
-        print_board(dict(solution))
+    print_board(dict(solution))
 
 
 if __name__ == '__main__':
     main()
+
+## References
+# http://norvig.com/sudoku.html
